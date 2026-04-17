@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>EduPoint — Connexion</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<!-- Firebase SDK (optionnel) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--navy:#07111f;--navy2:#0e1f35;--accent:#00d4aa;--accent2:#ff6b35;--red:#ff4757;--text:#ccd6f6;--text2:#7a8aaa;--white:#e8f4f8;--border:rgba(0,212,170,0.13)}
+html,body{min-height:100vh;font-family:'Sora',sans-serif;background:var(--navy);color:var(--text)}
+.wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#07111f 0%,#0e1f35 55%,#091929 100%);position:relative;overflow:hidden}
+.wrap::before{content:'';position:absolute;width:700px;height:700px;background:radial-gradient(circle,rgba(0,212,170,.07) 0%,transparent 65%);top:-250px;right:-150px;border-radius:50%;animation:glow 5s ease-in-out infinite}
+.wrap::after{content:'';position:absolute;width:500px;height:500px;background:radial-gradient(circle,rgba(255,107,53,.05) 0%,transparent 65%);bottom:-150px;left:-100px;border-radius:50%;animation:glow 5s ease-in-out infinite 2.5s}
+@keyframes glow{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.08);opacity:.7}}
+.card{background:rgba(14,31,53,.93);backdrop-filter:blur(24px);border:1px solid var(--border);border-radius:22px;padding:48px 42px;width:440px;max-width:94vw;position:relative;z-index:2;box-shadow:0 30px 70px rgba(0,0,0,.55);animation:cardIn .5s cubic-bezier(.22,.68,0,1.2)}
+@keyframes cardIn{from{opacity:0;transform:translateY(28px) scale(.97)}to{opacity:1;transform:none}}
+.logo{text-align:center;margin-bottom:34px}
+.logo-icon{width:68px;height:68px;background:linear-gradient(135deg,var(--accent),#00a885);border-radius:18px;margin:0 auto 14px;display:flex;align-items:center;justify-content:center;font-size:30px;box-shadow:0 10px 28px rgba(0,212,170,.32)}
+.logo-title{font-size:24px;font-weight:800;color:var(--white);letter-spacing:-.5px}
+.logo-sub{font-size:13px;color:var(--text2);margin-top:4px}
+.form-group{margin-bottom:18px}
+.form-label{display:block;font-size:11px;font-weight:700;color:var(--text2);margin-bottom:7px;text-transform:uppercase;letter-spacing:.6px}
+.form-input{width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(0,212,170,.18);border-radius:11px;padding:13px 16px;color:var(--text);font-family:'Sora',sans-serif;font-size:14px;transition:all .2s;outline:none}
+.form-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,212,170,.1);background:rgba(255,255,255,.08)}
+.form-input::placeholder{color:var(--text2)}
+.btn-login{width:100%;background:linear-gradient(135deg,var(--accent),#00a885);border:none;border-radius:11px;padding:14px;color:var(--navy);font-family:'Sora',sans-serif;font-size:15px;font-weight:700;cursor:pointer;transition:all .2s;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:8px}
+.btn-login:hover{transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,212,170,.42)}
+.btn-login:disabled{opacity:.6;cursor:not-allowed;transform:none}
+.error-box{background:rgba(255,71,87,.13);border:1px solid rgba(255,71,87,.28);border-radius:9px;padding:10px 14px;color:#ff6b7a;font-size:13px;margin-bottom:14px;display:none}
+.firebase-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);margin-top:14px;justify-content:center}
+.fb-dot{width:7px;height:7px;border-radius:50%;background:var(--text2)}
+.fb-dot.on{background:#2ed573;box-shadow:0 0 6px #2ed573}
+.spinner{width:16px;height:16px;border:2px solid rgba(7,17,31,.3);border-top-color:var(--navy);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="logo">
+      <div class="logo-icon">🎓</div>
+      <div class="logo-title">EduPoint</div>
+      <div class="logo-sub">Système de gestion des présences scolaires</div>
+    </div>
+    <div id="errBox" class="error-box"></div>
+    <div class="form-group">
+      <label class="form-label">Matricule ou Email</label>
+      <input class="form-input" id="loginId" placeholder="Matricule" autocomplete="username"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Mot de passe</label>
+      <input class="form-input" id="loginPwd" type="password" placeholder="••••••••" autocomplete="current-password"/>
+    </div>
+    <button class="btn-login" id="btnLogin" onclick="doLogin()">Se connecter →</button>
+
+
+    <div class="firebase-status">
+      <div class="fb-dot" id="fbDot"></div>
+      <span id="fbStatus">Mode local (localStorage)</span>
+    </div>
+  </div>
+</div>
+
+<script src="data.js"></script>
+<script>
+function showError(msg) {
+  var b = document.getElementById('errBox');
+  b.textContent = msg;
+  b.style.display = 'block';
+}
+
+function doLogin() {
+  var id  = document.getElementById('loginId').value.trim();
+  var pwd = document.getElementById('loginPwd').value;
+  document.getElementById('errBox').style.display = 'none';
+
+  if (!id || !pwd) { showError('Veuillez remplir tous les champs.'); return; }
+
+  var btn = document.getElementById('btnLogin');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> Connexion...';
+
+  // Recharger les données depuis localStorage au cas où elles ont été mises à jour
+  try {
+    var savedUsers = localStorage.getItem('edupoint_users');
+    if (savedUsers) USERS = JSON.parse(savedUsers);
+  } catch(e) {}
+
+  setTimeout(function() {
+    var user = null;
+    for (var i = 0; i < USERS.length; i++) {
+      if ((USERS[i].matricule === id || USERS[i].email === id) && USERS[i].password === pwd) {
+        user = USERS[i]; break;
+      }
+    }
+    if (!user) {
+      showError('Identifiant ou mot de passe incorrect.');
+      btn.disabled = false;
+      btn.innerHTML = 'Se connecter →';
+      return;
+    }
+    saveSession(user);
+    var pages = { admin:'admin.html', directeur:'directeur.html', professeur:'professeur.html', etudiant:'etudiant.html' };
+    window.location.href = pages[user.role] || 'index.html';
+  }, 300);
+}
+
+// Mettre à jour le statut Firebase
+function updateFirebaseStatus() {
+  var dot = document.getElementById('fbDot');
+  var status = document.getElementById('fbStatus');
+  if (isFirebaseConfigured() && firebaseReady) {
+    dot.className = 'fb-dot on';
+    status.textContent = 'Firebase connecté — données synchronisées';
+  } else if (isFirebaseConfigured()) {
+    dot.className = 'fb-dot';
+    status.textContent = 'Connexion Firebase en cours...';
+  } else {
+    dot.className = 'fb-dot';
+    status.textContent = 'Mode local (localStorage) — multi-onglets';
+  }
+}
+
+// Initialiser Firebase si configuré
+initFirebase();
+setTimeout(updateFirebaseStatus, 1000);
+
+document.getElementById('loginId').addEventListener('keydown', function(e){ if(e.key==='Enter') doLogin(); });
+document.getElementById('loginPwd').addEventListener('keydown', function(e){ if(e.key==='Enter') doLogin(); });
+</script>
+</body>
+</html>

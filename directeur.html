@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>EduPoint — Espace Directeur</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<!-- Firebase SDK (optionnel) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="data.js"></script>
+</head>
+<body>
+
+<!-- DRAWER OVERLAY (mobile) -->
+<div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+<div class="layout">
+  <div class="sidebar">
+    <div class="sb-logo">
+      <div class="sb-logo-inner">
+        <div class="sb-logo-icon">🎓</div>
+        <div><div class="sb-logo-text">EduPoint</div><div class="sb-logo-ver">Espace Directeur</div></div>
+      </div>
+    </div>
+    <div class="sb-section">
+      <div class="sb-section-title">Navigation</div>
+      <a class="nav-item active" href="#" id="nav-dashboard"></a>
+      <a class="nav-item" href="#" id="nav-presence"></a>
+      <a class="nav-item" href="#" id="nav-statistiques"></a>
+      <a class="nav-item" href="#" id="nav-rapports"></a>
+    </div>
+    <div class="sb-bottom">
+      <div class="user-badge">
+        <div class="user-avatar" id="userAvatar">??</div>
+        <div><div class="user-name" id="userName">—</div><div class="user-role">Directeur</div></div>
+      </div>
+      <button class="btn-logout" id="btnLogout"></button>
+    </div>
+  </div>
+  <div class="main-area">
+    <div class="topbar">
+      <button class="burger-btn" onclick="openDrawer()" aria-label="Menu"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+      <div class="topbar-title" id="pageTitle">Tableau de bord</div>
+      <div class="topbar-right">
+        <span class="readonly-badge">Lecture seule</span>
+        <span class="clock-badge mono" id="clock">--:--:--</span>
+      </div>
+    </div>
+    <div class="content" id="mainContent"></div>
+  </div>
+</div>
+
+<script>
+document.getElementById('nav-dashboard').innerHTML    = ICO.home    + '<span>Tableau de bord</span>';
+document.getElementById('nav-presence').innerHTML     = ICO.users   + '<span>Présences</span>';
+document.getElementById('nav-statistiques').innerHTML = ICO.chart   + '<span>Statistiques</span>';
+document.getElementById('nav-rapports').innerHTML     = ICO.report  + '<span>Rapports</span>';
+document.getElementById('btnLogout').innerHTML = ICO.logout + ' Déconnexion';
+document.getElementById('btnLogout').onclick = logout;
+
+var currentUser = loadSession();
+if (!currentUser || currentUser.role !== 'directeur') { window.location.href = 'index.html'; }
+document.getElementById('userAvatar').textContent = currentUser.prenom[0] + currentUser.nom[0];
+document.getElementById('userName').textContent = currentUser.prenom + ' ' + currentUser.nom;
+
+setInterval(function(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString('fr-FR'); }, 1000);
+// Rafraîchissement automatique toutes les 30s
+setInterval(function(){
+  try {
+    var raw = localStorage.getItem('edupoint_pointages');
+    if (raw) POINTAGES = JSON.parse(raw);
+    var rawU = localStorage.getItem('edupoint_users');
+    if (rawU) USERS = JSON.parse(rawU);
+  } catch(e) {}
+  render();
+}, 10000);
+
+var section = 'dashboard';
+var myChart = null;
+
+// Callback pour les mises à jour inter-onglets et Firebase
+function onDataUpdated() { render(); }
+
+function setSection(s) {
+  section = s;
+  var titles = {dashboard:'Tableau de bord', presence:'Présences du jour', statistiques:'Statistiques', rapports:'Rapports'};
+  document.getElementById('pageTitle').textContent = titles[s] || s;
+  document.querySelectorAll('.nav-item').forEach(function(el){ el.classList.remove('active'); });
+  document.getElementById('nav-'+s).classList.add('active');
+  if (myChart) { try{myChart.destroy();}catch(e){} myChart=null; }
+  render(); window.scrollTo(0,0);
+}
+['dashboard','presence','statistiques','rapports'].forEach(function(s){
+  document.getElementById('nav-'+s).addEventListener('click', function(e){ e.preventDefault(); setSection(s); });
+});
+
+function badge(statut){ var txt=statut==='present'?'Présent':statut==='retard'?'Retard':'Absent'; return '<span class="badge '+statut+'">'+txt+'</span>'; }
+function statCard(val,lbl,color,icon){ return '<div class="stat-card c-'+color+'"><div class="stat-icon">'+icon+'</div><div class="stat-val">'+val+'</div><div class="stat-lbl">'+lbl+'</div></div>'; }
+
+function render() {
+  if (section==='dashboard') renderDashboard();
+  else if (section==='presence') renderPresence();
+  else if (section==='statistiques') renderStats();
+  else renderRapports();
+}
+
+var presFiltrDate = getToday();
+
+function renderDashboard() {
+  var s = getStudents();
+  var pres = s.filter(function(x){ var p=getP(x.id); return p&&p.statut!=='absent'; }).length;
+  var abs = s.length - pres;
+  var ret = POINTAGES.filter(function(p){ return p.date===getToday()&&p.statut==='retard'; }).length;
+  var profsPresents = getProfs().filter(function(x){ var p=getP(x.id); return p&&p.statut!=='absent'; }).length;
+
+  var weekData = [];
+  for (var i=6;i>=0;i--) {
+    var d=new Date(); d.setDate(d.getDate()-i);
+    var ds=d.toISOString().split('T')[0];
+    var dp=POINTAGES.filter(function(p){return p.date===ds;});
+    weekData.push({day:d.toLocaleDateString('fr-FR',{weekday:'short'}), presents:dp.filter(function(p){return p.statut==='present'||p.statut==='retard';}).length, absents:dp.filter(function(p){return p.statut==='absent';}).length});
+  }
+
+  document.getElementById('mainContent').innerHTML =
+    '<div class="section-head"><div><div class="page-title">Bonjour, '+currentUser.prenom+' 👋</div><div class="page-sub">'+fmtFull()+'</div></div></div>' +
+    '<div class="stats-grid">' +
+      statCard(s.length,'Total étudiants','blue',ICO.users) +
+      statCard(getProfs().length,'Professeurs','blue',ICO.user) +
+      statCard(pres,"Présents aujourd'hui",'green',ICO.check) +
+      statCard(abs,"Absents aujourd'hui",'red',ICO.xmark) +
+      statCard(ret,'Retards','orange',ICO.warn) +
+      statCard(profsPresents,'Profs présents','green',ICO.user) +
+    '</div>' +
+    '<div class="chart-card"><div class="chart-title">Présences / Absences cette semaine</div><div class="chart-canvas-wrap"><canvas id="myChart"></canvas></div></div>';
+
+  setTimeout(function(){
+    var ctx = document.getElementById('myChart');
+    if (!ctx) return;
+    myChart = new Chart(ctx, {
+      type:'bar',
+      data:{labels:weekData.map(function(d){return d.day;}),datasets:[
+        {label:'Présents',data:weekData.map(function(d){return d.presents;}),backgroundColor:'rgba(46,213,115,.75)',borderRadius:5},
+        {label:'Absents',data:weekData.map(function(d){return d.absents;}),backgroundColor:'rgba(255,71,87,.75)',borderRadius:5}
+      ]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a8aaa',font:{family:'Sora'}}},tooltip:{backgroundColor:'#0e1f35',borderColor:'rgba(0,212,170,.2)',borderWidth:1,titleColor:'#ccd6f6',bodyColor:'#ccd6f6',cornerRadius:8}},scales:{x:{ticks:{color:'#7a8aaa'},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#7a8aaa'},grid:{color:'rgba(255,255,255,.04)'}}}}
+    });
+  }, 60);
+}
+
+var dirFiliere='', dirNiveau='';
+function renderPresence() {
+  var stu = getStudents().filter(function(s){
+    var mf = !dirFiliere || s.classe.indexOf(dirFiliere) === 0;
+    var mn = !dirNiveau  || s.classe.slice(-1) === dirNiveau;
+    return mf && mn;
+  });
+  var optF = '<option value="">Toutes les filières</option>';
+  FILIERES.forEach(function(f){ optF += '<option value="'+f+'"'+(dirFiliere===f?' selected':'')+'>'+f+'</option>'; });
+  var optN = '<option value="">Tous les niveaux</option>';
+  NIVEAUX.forEach(function(n){ optN += '<option value="'+n.val+'"'+(dirNiveau===n.val?' selected':'')+'>'+n.label+'</option>'; });
+  // Filtrer : seulement ceux qui ont pointé ce jour + inclure profs
+  var tous = USERS.filter(function(u){ return u.role==='etudiant'||u.role==='professeur'; })
+    .filter(function(s){
+      var mf = !dirFiliere || (s.classe||'').indexOf(dirFiliere) === 0;
+      var mn = !dirNiveau  || (s.classe||'').slice(-1) === dirNiveau;
+      return mf && mn;
+    });
+  var pointeurs = tous.filter(function(s){ var p=getP(s.id,presFiltrDate); return p!==undefined&&p!==null; });
+  var rows = pointeurs.map(function(s){
+    var p = getP(s.id, presFiltrDate);
+    var roleTag = s.role==='professeur' ? '<span class="role-tag professeur" style="margin-left:6px;font-size:10px">Prof</span>' : '';
+    return '<tr><td><b>'+s.nom+'</b> '+s.prenom+roleTag+'</td><td class="mono" style="font-size:12px;color:var(--text2)">'+s.matricule+'</td><td>'+(s.classe||'—')+'</td><td class="mono">'+(p&&p.entree?p.entree:'—')+'</td><td class="mono">'+(p&&p.sortie?p.sortie:'—')+'</td><td>'+badge(p?p.statut:'absent')+'</td></tr>';
+  }).join('');
+  document.getElementById('mainContent').innerHTML =
+    '<div class="section-head"><div class="page-title">Présences du jour</div></div>' +
+    '<div class="tbl-wrap" style="margin-bottom:16px"><div class="tbl-head"><div class="tbl-title">Filtres</div>' +
+    '<div class="tbl-filters">' +
+      '<input type="date" class="filter-inp" value="'+presFiltrDate+'" onchange="presFiltrDate=this.value;renderPresence()"/>' +
+      '<select class="filter-inp" onchange="dirFiliere=this.value;renderPresence()">'+optF+'</select>' +
+      '<select class="filter-inp" onchange="dirNiveau=this.value;renderPresence()">'+optN+'</select>' +
+    '</div></div></div>' +
+    '<div class="tbl-wrap"><div class="tbl-head"><div class="tbl-title">Pointages du '+fmtDate(presFiltrDate)+' ('+pointeurs.length+' personne(s))</div></div>' +
+    '<table><thead><tr><th>Nom & Prénom</th><th>Matricule</th><th>Classe / Matière</th><th>Entrée</th><th>Sortie</th><th>Statut</th></tr></thead>' +
+    '<tbody>'+(rows||'<tr><td colspan="6"><div class="empty">Aucun pointage enregistré pour cette date</div></td></tr>')+'</tbody></table></div>';
+}
+
+function renderStats() {
+  var s = getStudents();
+  var rows = s.map(function(st){
+    var sp = POINTAGES.filter(function(p){return p.userId===st.id;});
+    var pres=sp.filter(function(p){return p.statut==='present'||p.statut==='retard';}).length;
+    var abs=sp.filter(function(p){return p.statut==='absent';}).length;
+    var ret=sp.filter(function(p){return p.statut==='retard';}).length;
+    var pct = Math.round(pres/(sp.length||1)*100);
+    return '<tr><td><b>'+st.nom+'</b> '+st.prenom+'</td><td>'+st.classe+'</td>' +
+      '<td style="color:var(--green);font-weight:600">'+pres+'</td>' +
+      '<td style="color:var(--red);font-weight:600">'+abs+'</td>' +
+      '<td style="color:var(--orange);font-weight:600">'+ret+'</td>' +
+      '<td><div style="display:flex;align-items:center;gap:8px"><div class="progress-bar"><div class="progress-fill" style="width:'+pct+'%"></div></div><span style="font-size:12px;color:var(--text2)">'+pct+'%</span></div></td></tr>';
+  }).join('');
+  document.getElementById('mainContent').innerHTML =
+    '<div class="section-head"><div class="page-title">Statistiques globales</div></div>' +
+    '<div class="stats-grid">' +
+      statCard(s.length,'Étudiants','blue',ICO.users) +
+      statCard(getProfs().length,'Professeurs','blue',ICO.user) +
+      statCard(POINTAGES.filter(function(p){return p.statut==='present'||p.statut==='retard';}).length,'Présences totales','green',ICO.check) +
+      statCard(POINTAGES.filter(function(p){return p.statut==='absent';}).length,'Absences totales','red',ICO.xmark) +
+    '</div>' +
+    '<div class="tbl-wrap"><div class="tbl-head"><div class="tbl-title">Bilan par étudiant</div></div>' +
+    '<table><thead><tr><th>Nom & Prénom</th><th>Classe</th><th>Présences</th><th>Absences</th><th>Retards</th><th>Taux</th></tr></thead>' +
+    '<tbody>'+rows+'</tbody></table></div>';
+}
+
+function renderRapports() {
+  var s = getStudents();
+  var pres = s.filter(function(x){var p=getP(x.id);return p&&p.statut!=='absent';}).length;
+  var rpts = [
+    {t:'Rapport journalier', d:'Présences du '+fmtDate(getToday()), e:'📅', v:pres+' présents / '+(s.length-pres)+' absents'},
+    {t:'Rapport hebdomadaire', d:'Synthèse de la semaine', e:'📊', v:POINTAGES.filter(function(p){return p.statut==='present'||p.statut==='retard';}).length+' présences totales'},
+    {t:'Rapport mensuel', d:'Bilan du mois courant', e:'📈', v:s.length+' étudiants suivis'},
+    {t:'Rapport absences', d:'Récapitulatif des absences', e:'❌', v:POINTAGES.filter(function(p){return p.statut==='absent';}).length+' absences'},
+    {t:'Rapport retards', d:'Récapitulatif des retards', e:'⚠️', v:POINTAGES.filter(function(p){return p.statut==='retard';}).length+' retards'},
+    {t:'Rapport professeurs', d:'Assiduité du corps enseignant', e:'👨‍🏫', v:getProfs().length+' professeurs actifs'},
+  ];
+  var cards = rpts.map(function(r){
+    return '<div class="stat-card c-blue"><div style="font-size:34px;margin-bottom:12px">'+r.e+'</div><div style="font-size:15px;font-weight:700;color:var(--white);margin-bottom:5px">'+r.t+'</div><div style="font-size:12.5px;color:var(--text2);margin-bottom:12px">'+r.d+'</div><div style="font-size:13px;color:var(--accent);font-weight:600">'+r.v+'</div></div>';
+  }).join('');
+  document.getElementById('mainContent').innerHTML =
+    '<div class="section-head"><div class="page-title">Rapports & Synthèses</div></div>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px">'+cards+'</div>';
+}
+
+// Charger config Firebase si disponible
+(function() {
+  try {
+    var savedCfg = localStorage.getItem('edupoint_firebase_config');
+    if (savedCfg) Object.assign(FIREBASE_CONFIG, JSON.parse(savedCfg));
+  } catch(e) {}
+})();
+
+initFirebase();
+render();
+</script>
+</body>
+</html>

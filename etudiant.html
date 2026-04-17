@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>EduPoint — Espace Étudiant</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<!-- Firebase SDK (optionnel) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="data.js"></script>
+<style>
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.content>*{animation:fadeIn .3s ease}
+</style>
+</head>
+<body>
+
+<!-- DRAWER OVERLAY (mobile) -->
+<div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+<div class="layout">
+  <div class="sidebar">
+    <div class="sb-logo">
+      <div class="sb-logo-inner">
+        <div class="sb-logo-icon">🎓</div>
+        <div><div class="sb-logo-text">EduPoint</div><div class="sb-logo-ver">Espace Étudiant</div></div>
+      </div>
+    </div>
+    <div class="sb-section">
+      <div class="sb-section-title">Navigation</div>
+      <a class="nav-item active" href="#" id="nav-accueil"></a>
+      <a class="nav-item" href="#" id="nav-historique"></a>
+    </div>
+    <div class="sb-bottom">
+      <div class="user-badge">
+        <div class="user-avatar" id="userAvatar">??</div>
+        <div><div class="user-name" id="userName">—</div><div class="user-role" id="userMatricule">—</div></div>
+      </div>
+      <button class="btn-logout" id="btnLogout"></button>
+    </div>
+  </div>
+  <div class="main-area">
+    <div class="topbar">
+      <button class="burger-btn" onclick="openDrawer()" aria-label="Menu"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+      <div class="topbar-title" id="pageTitle">Accueil</div>
+      <div class="topbar-right">
+        <span class="clock-badge mono" id="clock">--:--:--</span>
+      </div>
+    </div>
+    <div class="content" id="mainContent"></div>
+  </div>
+</div>
+<div class="toast" id="toast"><span id="toastIcon"></span><span id="toastMsg"></span></div>
+
+<script>
+// Icônes sidebar
+document.getElementById('nav-accueil').innerHTML = ICO.home + '<span>Accueil</span>';
+document.getElementById('nav-historique').innerHTML = ICO.history + '<span>Mon historique</span>';
+document.getElementById('btnLogout').innerHTML = ICO.logout + ' Déconnexion';
+document.getElementById('btnLogout').onclick = logout;
+
+// Vérif session
+var currentUser = loadSession();
+if (!currentUser || currentUser.role !== 'etudiant') { window.location.href = 'index.html'; }
+
+document.getElementById('userAvatar').textContent = currentUser.prenom[0] + currentUser.nom[0];
+document.getElementById('userName').textContent = currentUser.prenom + ' ' + currentUser.nom;
+document.getElementById('userMatricule').textContent = currentUser.matricule + ' — ' + (currentUser.classe||'');
+
+setInterval(function(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString('fr-FR'); }, 1000);
+
+var toastTimer;
+function showToast(msg, type) {
+  type = type||'success';
+  var t = document.getElementById('toast');
+  t.className = 'toast show ' + type;
+  document.getElementById('toastIcon').textContent = type==='success' ? '✓' : '!';
+  document.getElementById('toastMsg').textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ t.className='toast'; }, 3000);
+}
+
+var section = window.location.hash === '#historique' ? 'historique' : 'accueil';
+
+function setSection(s) {
+  section = s;
+  document.getElementById('pageTitle').textContent = s === 'accueil' ? 'Accueil' : 'Mon historique';
+  document.querySelectorAll('.nav-item').forEach(function(el){ el.classList.remove('active'); });
+  document.getElementById('nav-' + s).classList.add('active');
+  render();
+  window.scrollTo(0,0);
+}
+
+document.getElementById('nav-accueil').addEventListener('click', function(e){ e.preventDefault(); setSection('accueil'); });
+document.getElementById('nav-historique').addEventListener('click', function(e){ e.preventDefault(); setSection('historique'); });
+
+// Callback appelé quand les données changent (via localStorage ou Firebase)
+function onDataUpdated() { render(); }
+
+function render() {
+  if (section === 'accueil') renderAccueil();
+  else renderHistorique();
+}
+
+function badge(statut) {
+  var txt = statut==='present'?'Présent':statut==='retard'?'Retard':'Absent';
+  return '<span class="badge '+statut+'">'+txt+'</span>';
+}
+
+function renderAccueil() {
+  var uid = currentUser.id;
+  var p = getP(uid);
+  var hasE = p ? p.entree : null;
+  var hasS = p ? p.sortie : null;
+  var dotClass = hasE ? (p.statut==='present'?'green':'orange') : 'red';
+  var statutTxt = p ? (p.statut==='present'?'Présent ✓':p.statut==='retard'?'⚠ Retard':'Absent') : 'Non pointé';
+
+  var statusExtra = '';
+  if (hasE) statusExtra += '<div class="status-chip"><span class="chip-lbl">Entrée :</span><span class="chip-val">'+hasE+'</span></div>';
+  if (hasS) statusExtra += '<div class="status-chip"><span class="chip-lbl">Sortie :</span><span class="chip-val">'+hasS+'</span></div>';
+
+  var sp = POINTAGES.filter(function(p){ return p.userId===uid; });
+  var pres = sp.filter(function(p){ return p.statut==='present' || p.statut==='retard'; }).length;
+  var abs  = sp.filter(function(p){ return p.statut==='absent'; }).length;
+  var ret  = sp.filter(function(p){ return p.statut==='retard'; }).length;
+
+  document.getElementById('mainContent').innerHTML =
+    '<div class="section-head"><div>' +
+      '<div class="page-title">Bonjour, '+currentUser.prenom+' 👋</div>' +
+      '<div class="page-sub">'+fmtFull()+'</div>' +
+    '</div></div>' +
+
+    '<div class="pointage-panel">' +
+      '<div class="pnl-title">⏱ Pointage du jour</div>' +
+      '<div class="pnl-sub">'+fmtFull()+'</div>' +
+      '<div class="pnl-btns">' +
+        '<button class="btn-entree" '+(hasE?'disabled':'')+' onclick="doPointage(\'entree\')">' +
+          ICO.check + ' ' + (hasE ? 'Entrée enregistrée ('+hasE+')' : "Pointer l'entrée") +
+        '</button>' +
+        '<button class="btn-sortie" '+((!hasE||hasS)?'disabled':'')+' onclick="doPointage(\'sortie\')">' +
+          ICO.xmark + ' ' + (hasS ? 'Sortie enregistrée ('+hasS+')' : 'Pointer la sortie') +
+        '</button>' +
+      '</div>' +
+      '<div class="pnl-status">' +
+        '<div class="status-chip"><div class="dot '+dotClass+'"></div><span class="chip-lbl">Statut :</span><span class="chip-val">'+statutTxt+'</span></div>' +
+        statusExtra +
+      '</div>' +
+    '</div>' +
+
+    '<div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">' +
+      '<div class="stat-card c-blue"><div class="stat-icon">'+ICO.history+'</div><div class="stat-val">'+sp.length+'</div><div class="stat-lbl">Jours enregistrés</div></div>' +
+      '<div class="stat-card c-green"><div class="stat-icon">'+ICO.check+'</div><div class="stat-val">'+pres+'</div><div class="stat-lbl">Présences</div></div>' +
+      '<div class="stat-card c-red"><div class="stat-icon">'+ICO.xmark+'</div><div class="stat-val">'+abs+'</div><div class="stat-lbl">Absences</div></div>' +
+      '<div class="stat-card c-orange"><div class="stat-icon">'+ICO.warn+'</div><div class="stat-val">'+ret+'</div><div class="stat-lbl">Retards</div></div>' +
+    '</div>';
+}
+
+function renderHistorique() {
+  var uid = currentUser.id;
+  var sp = POINTAGES.filter(function(p){ return p.userId===uid; }).sort(function(a,b){ return b.date.localeCompare(a.date); });
+  var rows = sp.map(function(p){
+    return '<tr><td>'+fmtDate(p.date)+'</td><td class="mono">'+(p.entree||'—')+'</td><td class="mono">'+(p.sortie||'—')+'</td><td>'+badge(p.statut)+'</td></tr>';
+  }).join('');
+
+  document.getElementById('mainContent').innerHTML =
+    '<div class="section-head"><div class="page-title">Mon historique de présences</div></div>' +
+    '<div class="tbl-wrap">' +
+      '<div class="tbl-head"><div class="tbl-title">Tous mes pointages</div></div>' +
+      '<table><thead><tr><th>Date</th><th>Entrée</th><th>Sortie</th><th>Statut</th></tr></thead>' +
+      '<tbody>'+(rows || '<tr><td colspan="4"><div class="empty">Aucun pointage enregistré</div></td></tr>')+'</tbody>' +
+      '</table>' +
+    '</div>';
+}
+
+function doPointage(type) {
+  // Recharger les données les plus récentes depuis localStorage
+  try {
+    var raw = localStorage.getItem('edupoint_pointages');
+    if (raw) POINTAGES = JSON.parse(raw);
+  } catch(e) {}
+
+  var now = getNow();
+  var existing = getP(currentUser.id);
+
+  if (type === 'entree') {
+    if (existing) { showToast('Entrée déjà enregistrée aujourd\'hui', 'error'); return; }
+    var statut = getStatut(now);
+    POINTAGES.push({id:Date.now(), userId:currentUser.id, date:getToday(), entree:now, sortie:null, statut:statut});
+    showToast(statut==='present' ? 'Entrée pointée à '+now+' — À l\'heure ✓' : 'Entrée pointée à '+now+' — Retard ⚠');
+  } else {
+    if (!existing || existing.sortie) { showToast('Aucune entrée à clôturer', 'error'); return; }
+    existing.sortie = now;
+    showToast('Sortie pointée à ' + now);
+  }
+  // Sauvegarder dans localStorage (partagé) + Firebase si dispo
+  saveData();
+  render();
+}
+
+// Initialiser Firebase si configuré
+initFirebase();
+render();
+</script>
+</body>
+</html>
