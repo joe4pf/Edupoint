@@ -142,12 +142,12 @@ function logout() {
 //  sur le même navigateur (localStorage local)
 // ═══════════════════════════════════════════════
 var FIREBASE_CONFIG = {
-  apiKey: "VOTRE_API_KEY",
-  authDomain: "VOTRE_PROJECT.firebaseapp.com",
-  projectId: "VOTRE_PROJECT_ID",
-  storageBucket: "VOTRE_PROJECT.appspot.com",
-  messagingSenderId: "VOTRE_SENDER_ID",
-  appId: "VOTRE_APP_ID"
+  apiKey: "AIzaSyDMGwBdtilYkxAqBAhwx4MHu5HRa-BQ_Vo",
+  authDomain: "edupoint-8a809.firebaseapp.com",
+  projectId: "edupoint-8a809",
+  storageBucket: "edupoint-8a809.firebasestorage.app",
+  messagingSenderId: "980284812948",
+  appId: "1:980284812948:web:376b09405b333857f7ce81"
 };
 
 var firebaseReady = false;
