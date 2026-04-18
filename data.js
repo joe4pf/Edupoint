@@ -111,10 +111,16 @@ function loadSession() {
 
 // ── SAUVEGARDE PARTAGÉE (localStorage + Firebase si dispo) ──
 function saveData() {
-  localStorage.setItem('edupoint_users', JSON.stringify(USERS));
-  localStorage.setItem('edupoint_pointages', JSON.stringify(POINTAGES));
-  localStorage.setItem('edupoint_lastUpdate', Date.now().toString());
-  // Firebase : sauvegarde immédiate si connecté
+  // 1. localStorage (même navigateur / multi-onglets)
+  try {
+    localStorage.setItem('edupoint_users', JSON.stringify(USERS));
+    localStorage.setItem('edupoint_pointages', JSON.stringify(POINTAGES));
+    localStorage.setItem('edupoint_lastUpdate', Date.now().toString());
+  } catch(e) { console.warn('localStorage saveData:', e); }
+
+  // 2. Firebase (OBLIGATOIRE pour partage multi-appareils / site hébergé)
+  // Sans Firebase configuré, les pointages ne sont visibles que sur
+  // le même navigateur. Configurez Firebase via le bouton 🔥 chez l'admin.
   firebaseSaveData();
 }
 
@@ -142,12 +148,12 @@ function logout() {
 //  sur le même navigateur (localStorage local)
 // ═══════════════════════════════════════════════
 var FIREBASE_CONFIG = {
-  apiKey: "AIzaSyDMGwBdtilYkxAqBAhwx4MHu5HRa-BQ_Vo",
-  authDomain: "edupoint-8a809.firebaseapp.com",
-  projectId: "edupoint-8a809",
-  storageBucket: "edupoint-8a809.firebasestorage.app",
-  messagingSenderId: "980284812948",
-  appId: "1:980284812948:web:376b09405b333857f7ce81"
+  apiKey: "VOTRE_API_KEY",
+  authDomain: "VOTRE_PROJECT.firebaseapp.com",
+  projectId: "VOTRE_PROJECT_ID",
+  storageBucket: "VOTRE_PROJECT.appspot.com",
+  messagingSenderId: "VOTRE_SENDER_ID",
+  appId: "VOTRE_APP_ID"
 };
 
 var firebaseReady = false;
@@ -253,11 +259,32 @@ function firebaseListenRealtime() {
 
 // Sauvegarder dans Firestore — appelé à chaque saveData()
 function firebaseSaveData() {
-  if (!firebaseReady || !db) return;
-  db.collection('edupoint').doc('users').set({ list: USERS, updatedAt: Date.now() })
-    .catch(function(e) { console.warn('Firebase save users:', e); });
-  db.collection('edupoint').doc('pointages').set({ list: POINTAGES, updatedAt: Date.now() })
-    .catch(function(e) { console.warn('Firebase save pointages:', e); });
+  if (!firebaseReady || !db) {
+    // Firebase non prêt — on retry dans 2s si en cours d'init
+    if (isFirebaseConfigured() && !firebaseReady) {
+      setTimeout(function() { if (firebaseReady) firebaseSaveData(); }, 2000);
+    }
+    return;
+  }
+  // Sauvegarder les POINTAGES en priorité (opération la plus critique)
+  db.collection('edupoint').doc('pointages').set({
+    list: POINTAGES,
+    updatedAt: Date.now()
+  }).then(function() {
+    console.info('EduPoint: pointages sauvés dans Firebase ✓');
+  }).catch(function(e) {
+    console.error('Firebase save pointages ERREUR:', e);
+    // Retry une fois en cas d'erreur réseau
+    setTimeout(function() {
+      db.collection('edupoint').doc('pointages').set({ list: POINTAGES, updatedAt: Date.now() })
+        .catch(function(e2) { console.error('Firebase retry échoué:', e2); });
+    }, 3000);
+  });
+  // Sauvegarder les USERS (moins critique, si l'admin a ajouté quelqu'un)
+  db.collection('edupoint').doc('users').set({
+    list: USERS,
+    updatedAt: Date.now()
+  }).catch(function(e) { console.warn('Firebase save users:', e); });
 }
 
 // ── ICONES SVG ──
@@ -428,15 +455,46 @@ select.form-input{cursor:pointer;background-color:rgba(14,31,53,.97)}
 .drawer-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:199;backdrop-filter:blur(3px);opacity:0;transition:opacity .25s}
 .drawer-overlay.open{display:block;opacity:1}
 /* ── SIDEBAR en mode drawer sur mobile ── */
-@media(max-width:768px){
-  .burger-btn{display:flex}
-  .sidebar{transform:translateX(-100%);transition:transform .28s cubic-bezier(.4,0,.2,1);z-index:200;box-shadow:8px 0 40px rgba(0,0,0,.6)}
-  .sidebar.drawer-open{transform:translateX(0)}
-  .main-area{margin-left:0}
-  .content{padding:16px}
+@media(max-width:900px){
+  /* Drawer mobile */
+  .burger-btn{display:flex !important}
+  .sidebar{
+    transform:translateX(-100%);
+    transition:transform .28s cubic-bezier(.4,0,.2,1);
+    z-index:200;
+    box-shadow:8px 0 40px rgba(0,0,0,.6);
+  }
+  .sidebar.drawer-open{transform:translateX(0) !important}
+  .main-area{margin-left:0 !important}
+  .content{padding:12px}
+  /* Stats : 2 colonnes sur tablette */
   .stats-grid{grid-template-columns:1fr 1fr}
   .charts-grid{grid-template-columns:1fr}
-  .topbar{padding:12px 16px}
+  .topbar{padding:11px 14px;gap:8px}
+  .topbar-title{font-size:14px}
+  /* Table responsive */
+  table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  /* Modals full-width */
+  .modal-box{width:95vw;padding:20px}
+  .modal-grid{grid-template-columns:1fr}
+  /* Filtres en colonne */
+  .tbl-filters{flex-direction:column;align-items:stretch}
+  .filter-inp{width:100%}
+  /* Boutons de pointage full width */
+  .pnl-btns{flex-direction:column}
+  .btn-entree,.btn-sortie{width:100%;justify-content:center}
+}
+@media(max-width:480px){
+  /* Très petit écran (iPhone SE, vieux Android) */
+  .stats-grid{grid-template-columns:1fr 1fr;gap:10px}
+  .stat-card{padding:14px}
+  .stat-val{font-size:24px}
+  .stat-lbl{font-size:11px}
+  .content{padding:10px}
+  .section-head{flex-direction:column;align-items:flex-start}
+  .tbl-head{flex-direction:column;align-items:flex-start}
+  .clock-badge{font-size:12px;padding:5px 9px}
+  .firebase-badge{font-size:10px;padding:5px 8px}
 }
 `;
 

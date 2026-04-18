@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
 <title>EduPoint — Espace Directeur</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -241,6 +241,42 @@ function renderRapports() {
 
 initFirebase();
 render();
+
+// ══════════════════════════════════════════
+//  DRAWER MOBILE — Menu hamburger
+// ══════════════════════════════════════════
+function openDrawer() {
+  document.querySelector('.sidebar').classList.add('drawer-open');
+  document.getElementById('drawerOverlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeDrawer() {
+  document.querySelector('.sidebar').classList.remove('drawer-open');
+  document.getElementById('drawerOverlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+// Fermer si on clique sur un item du menu
+document.querySelectorAll('.nav-item').forEach(function(el) {
+  el.addEventListener('click', function() {
+    if (window.innerWidth <= 900) closeDrawer();
+  });
+});
+// Swipe gauche pour fermer
+(function() {
+  var startX = 0, startY = 0;
+  var sb = document.querySelector('.sidebar');
+  if (!sb) return;
+  sb.addEventListener('touchstart', function(e) {
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+  }, {passive: true});
+  sb.addEventListener('touchend', function(e) {
+    var dx = e.changedTouches[0].clientX - startX;
+    var dy = Math.abs(e.changedTouches[0].clientY - startY);
+    if (dx < -50 && dy < 80) closeDrawer();
+  }, {passive: true});
+})();
+
 </script>
 </body>
 </html>
